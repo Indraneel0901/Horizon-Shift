@@ -32,48 +32,65 @@ const SKY_FRAGMENT_SHADER = `
 
   vec3 scatterOneSun(vec3 viewRay, vec3 sunDir, vec3 sunColor, float sunElevation, float weight) {
     float mu = clamp(dot(viewRay, normalize(sunDir)), -1.0, 1.0);
-    float viewElevation = max(viewRay.y, -0.08);
-    float airMass = min(5.0, 1.0 / max(0.12, viewElevation + 0.11));
-    vec3 betaR = vec3(0.055, 0.20, 0.62);
-    float daylight = smoothstep(-0.16, 0.10, sunElevation);
-    float lowSun = 1.0 - smoothstep(0.015, 0.50, max(0.0, sunElevation));
-    float rayleighDepth = max(0.0, uRayleighStrength) * airMass * 0.34;
-    float mieDepth = max(0.0, uMieStrength) * airMass * 0.055;
-    vec3 extinction = exp(-(betaR * rayleighDepth + vec3(0.22) * mieDepth));
+    float viewHeight = max(viewRay.y, -0.04);
+    // A softened Chapman-like air-mass approximation: denser paths near the horizon,
+    // but no singularity at exactly zero elevation.
+    float airMass = min(7.5, 1.0 / max(0.12, viewHeight + 0.13));
+    vec3 betaR = vec3(0.065, 0.235, 0.82);
+    float daylight = smoothstep(-0.17, 0.13, sunElevation);
+    float twilight = smoothstep(-0.32, -0.02, sunElevation) * (1.0 - smoothstep(0.0, 0.15, sunElevation));
+    float lowSun = 1.0 - smoothstep(0.025, 0.48, max(0.0, sunElevation));
+    float rayleighDepth = max(0.0, uRayleighStrength) * airMass * 0.30;
+    float mieDepth = max(0.0, uMieStrength) * airMass * 0.052;
+    vec3 transmittance = exp(-(betaR * rayleighDepth + vec3(0.19) * mieDepth));
     float rayleighPhase = 0.75 * (1.0 + mu * mu);
     float g = 0.76;
-    float hgDenominator = pow(max(0.025, 1.0 + g*g - 2.0*g*mu), 1.5);
+    float hgDenominator = pow(max(0.035, 1.0 + g*g - 2.0*g*mu), 1.5);
     float miePhase = (1.0 - g*g) / (4.0 * PI * hgDenominator);
-    float horizonFade = exp(-max(viewRay.y, 0.0) * 7.5);
-    float atmosphereStrength = clamp(max(uRayleighStrength, uMieStrength * 0.25), 0.0, 1.0);
+
+    vec3 rayleigh = betaR * (1.0 - transmittance) * rayleighPhase * 1.72;
+    vec3 mie = uHazeColor * (1.0 - exp(-mieDepth)) * miePhase * 4.2;
+    vec3 aerosolDiffuse = uHazeColor * (1.0 - exp(-mieDepth * 0.7)) * 0.75;
     float aerosolAmount = clamp(uMieStrength / 2.2, 0.0, 1.0);
-    vec3 rayleigh = betaR * (1.0 - extinction) * rayleighPhase * 1.95;
-    vec3 mie = uHazeColor * (1.0 - exp(-mieDepth)) * miePhase * 5.2;
-    vec3 aerosolDiffuse = uHazeColor * (1.0 - exp(-mieDepth * 0.8)) * 0.85;
-    aerosolDiffuse += uHazeColor * aerosolAmount * 0.045;
-    vec3 sunsetAmber = vec3(1.0, 0.30, 0.105);
-    vec3 horizonBlue = vec3(0.27, 0.53, 0.78);
-    vec3 warmHorizon = mix(horizonBlue, mix(sunsetAmber, uHazeColor, 0.32), lowSun);
-    warmHorizon = mix(warmHorizon, uHazeColor, aerosolAmount * 0.72);
-    vec3 zenithBlue = vec3(0.012, 0.045, 0.15) * clamp(uRayleighStrength, 0.0, 1.2);
-    vec3 result = zenithBlue + rayleigh + mie + aerosolDiffuse;
-    result += warmHorizon * horizonFade * (0.055 + lowSun * 0.30 + aerosolAmount * 0.10) * atmosphereStrength;
-    result *= daylight * weight;
-    float starDisc = smoothstep(0.9989, 0.99975, mu) * 1.6 + pow(max(mu, 0.0), 72.0) * 0.12;
-    result += sunColor * starDisc * daylight * weight;
+    vec3 sunsetAmber = vec3(1.0, 0.34, 0.15);
+    vec3 horizonBlue = vec3(0.31, 0.57, 0.78);
+    vec3 warmHorizon = mix(horizonBlue, mix(sunsetAmber, uHazeColor, 0.30), lowSun);
+    warmHorizon = mix(warmHorizon, uHazeColor, aerosolAmount * 0.66);
+    float horizonLayer = exp(-max(viewRay.y, 0.0) * 4.6);
+    float atmosphereStrength = clamp(max(uRayleighStrength, uMieStrength * 0.25), 0.0, 1.0);
+    float illumination = clamp(daylight + twilight * 0.32, 0.0, 1.0);
+
+    vec3 result = rayleigh + mie + aerosolDiffuse;
+    result += warmHorizon * horizonLayer * (0.045 + lowSun * 0.24 + twilight * 0.12 + aerosolAmount * 0.075) * atmosphereStrength;
+    result *= illumination * weight;
+    float solarDisc = smoothstep(0.99915, 0.99986, mu) * 2.4;
+    float solarHalo = exp(-max(0.0, 1.0 - mu) * 55.0) * 0.11;
+    result += sunColor * (solarDisc + solarHalo) * illumination * weight;
     return result;
   }
-
   void main() {
     vec3 viewRay = normalize(vWorldPosition - cameraPosition);
-    vec3 nightSky = vec3(0.0018, 0.0045, 0.016) + vec3(0.005, 0.014, 0.04) * pow(max(viewRay.y, 0.0), 1.8);
-    vec3 sky = nightSky;
+    float maximumSunElevation = uSunElevation;
+    if (uSunWeight2 > 0.001) maximumSunElevation = max(maximumSunElevation, uSunElevation2);
+    if (uSunWeight3 > 0.001) maximumSunElevation = max(maximumSunElevation, uSunElevation3);
+    float sunBlend = smoothstep(-0.20, 0.18, maximumSunElevation);
+    float atmosphereStrength = clamp(max(uRayleighStrength, uMieStrength * 0.25), 0.0, 1.0);
+    vec3 nightSky = vec3(0.0015, 0.004, 0.014) + vec3(0.005, 0.014, 0.038) * pow(max(viewRay.y, 0.0), 1.6);
+    vec3 horizonDay = mix(vec3(0.14, 0.29, 0.40), uHazeColor, 0.62);
+    vec3 zenithDay = vec3(0.025, 0.10, 0.31) * clamp(uRayleighStrength, 0.0, 1.25);
+    float verticalBlend = smoothstep(-0.075, 0.58, viewRay.y);
+    float nearHorizon = exp(-abs(viewRay.y) * 3.7);
+    vec3 daySky = mix(horizonDay, zenithDay, verticalBlend);
+    daySky = mix(daySky, uHazeColor * 0.70 + vec3(0.08, 0.12, 0.16), nearHorizon * 0.28 * clamp(uMieStrength, 0.0, 1.0));
+    daySky *= atmosphereStrength;
+    vec3 sky = mix(nightSky, daySky, sunBlend);
     sky += scatterOneSun(viewRay, uSunDirection, uSunColor, uSunElevation, uSunWeight);
     sky += scatterOneSun(viewRay, uSunDirection2, uSunColor2, uSunElevation2, uSunWeight2);
     sky += scatterOneSun(viewRay, uSunDirection3, uSunColor3, uSunElevation3, uSunWeight3);
+    // A subtle screen-space dither prevents smooth sky gradients from quantizing into bands.
+    float grain = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+    sky += vec3((grain - 0.5) * 0.0018);
     gl_FragColor = vec4(max(sky, vec3(0.0)), 1.0);
-    #include <tonemapping_fragment>
-    #include <colorspace_fragment>
   }
 `;
 

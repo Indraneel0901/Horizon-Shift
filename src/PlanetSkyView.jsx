@@ -3,6 +3,7 @@ import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Stars } from "@react-three/drei";
 import * as THREE from "three";
 import AtmosphericSky from "./AtmosphericSky";
+import CinematicPostFX from "./CinematicPostFX";
 import TerrainEcosystem from "./TerrainEcosystem";
 import DistantFauna from "./DistantFauna";
 import { createTerrainDetailTexture } from "./proceduralVisuals";
@@ -19,7 +20,7 @@ import {
   getSkyPalette,
   validateSkyConfig,
 } from "./planetSkyModel";
-import { createSkyShareUrl, loadInitialSkyConfig, DEFAULT_CELESTIAL_SETTINGS } from "./skySharing";
+import { createSkyShareUrl, loadInitialSkyConfig, copyTextToClipboard, DEFAULT_CELESTIAL_SETTINGS } from "./skySharing";
 
 const gasShortLabels = {
   nitrogen: "N₂",
@@ -198,13 +199,12 @@ function smoothRange(low, high, value) {
 }
 
 function buildTerrainGeometry(config, terrainRelief = 1.0, ringShadows = false) {
-  // This is a local ground-level terrain patch, not a globe or a group of spheres.
-  // Broad noise defines ranges; ridged noise defines connected mountain chains;
-  // fine noise adds detail without turning the surface into random spikes.
-  const width = 52;
-  const depth = 58;
-  const segmentsX = 240;
-  const segmentsZ = 256;
+  // Broad local landscape extending beyond the camera frustum. The perimeter eases
+  // below sea level, so the viewer sees a coastline and distant terrain, not a cut slab.
+  const width = 88;
+  const depth = 96;
+  const segmentsX = 320;
+  const segmentsZ = 344;
   const geometry = new THREE.PlaneGeometry(width, depth, segmentsX, segmentsZ);
   geometry.rotateX(-Math.PI / 2);
 
@@ -213,21 +213,13 @@ function buildTerrainGeometry(config, terrainRelief = 1.0, ringShadows = false) 
   const type = config.surface.type;
   const surfaceColorHex = config.surface.baseColorHex || "#52795b";
   const terrainSeeds = {
-    "ocean-and-rock": 101,
-    rocky: 211,
-    ocean: 307,
-    icy: 401,
-    desert: 503,
-    volcanic: 601,
-    "gas-giant": 701,
-    custom: 809,
+    "ocean-and-rock": 101, rocky: 211, ocean: 307, icy: 401,
+    desert: 503, volcanic: 601, "gas-giant": 701, custom: 809,
   };
   const seed = terrainSeeds[type] || 101;
-  const reliefByType = { "ocean-and-rock": 1.0, rocky: 1.12, ocean: 0.88, icy: 0.82, desert: 0.9, volcanic: 1.18, custom: 1.0 };
+  const reliefByType = { "ocean-and-rock": 1.0, rocky: 1.08, ocean: 0.78, icy: 0.76, desert: 0.82, volcanic: 1.12, custom: 0.94 };
   const relief = reliefByType[type] || 1.0;
   const isGasGiant = type === "gas-giant";
-  // Lower the waterline relative to the old default so continental shelves and foothills
-  // stay visible; high water settings still inundate more of the landform.
   const seaLevel = THREE.MathUtils.clamp(-0.62 + config.surface.waterFraction * 0.38, -0.62, -0.24);
 
   for (let i = 0; i < positions.count; i += 1) {
@@ -235,54 +227,77 @@ function buildTerrainGeometry(config, terrainRelief = 1.0, ringShadows = false) 
     const z = positions.getZ(i);
     const nx = x / width + 0.5;
     const nz = z / depth + 0.5;
-
-    const continental = fractalNoise(nx * 2.5, nz * 2.05, seed + 2);
-    const regional = fractalNoise(nx * 5.3 + 4, nz * 4.25 - 3, seed + 31);
-    const coastNoise = fractalNoise(nx * 6.1 + 6, nz * 6.8 - 4, seed + 21);
-    const massif = fractalNoise(nx * 2.9 + 11, nz * 2.35 + 7, seed + 53);
-    const ridgeSource = fractalNoise(nx * 7.4 + 17, nz * 5.9 - 8, seed + 79);
-    const ridges = 1 - Math.abs(ridgeSource * 2 - 1);
-    const fine = fractalNoise(nx * 18.0 + 2, nz * 16.0 + 5, seed + 109);
+    const continental = fractalNoise(nx * 2.7, nz * 2.2, seed + 2);
+    const regional = fractalNoise(nx * 5.2 + 4, nz * 4.4 - 3, seed + 31);
+    const coastNoise = fractalNoise(nx * 7.6 + 6, nz * 6.7 - 4, seed + 21);
+    const massif = fractalNoise(nx * 3.3 + 11, nz * 2.8 + 7, seed + 53);
+    const ridgeSource = fractalNoise(nx * 8.9 + 17, nz * 7.1 - 8, seed + 79);
+    const fine = fractalNoise(nx * 18.5 + 2, nz * 16.8 + 5, seed + 109);
+    const warpX = (fractalNoise(nx * 2.0 + 14, nz * 2.1 - 8, seed + 117) - 0.5) * 0.16;
+    const warpZ = (fractalNoise(nx * 2.1 - 3, nz * 2.4 + 5, seed + 127) - 0.5) * 0.12;
+    const u = clamp(nx + warpX, 0, 1);
+    const v = clamp(nz + warpZ, 0, 1);
     let height;
 
     if (isGasGiant) {
-      // Gas giants have a banded cloud-top view, not solid mountains or ground.
-      const bands = Math.sin(nz * 83 + fractalNoise(nx * 3.6, nz * 8.1, seed + 43) * 3.0);
-      const stormUndulation = fractalNoise(nx * 7, nz * 4, seed + 67) - 0.5;
-      height = bands * 0.09 + stormUndulation * 0.11 + (regional - 0.5) * 0.035;
+      // Cloud-top banding, with broad turbulent structures and a softer fine-grain response.
+      const bandWave = Math.sin(v * 72 + (fractalNoise(u * 3.5, v * 6.2, seed + 43) - 0.5) * 2.8);
+      const stormUndulation = fractalNoise(u * 6.5 + 2, v * 3.8, seed + 67) - 0.5;
+      const wave = Math.sin(v * 18 + Math.sin(u * 8.2) * 0.8 + bandWave * 0.22);
+      height = bandWave * 0.045 + wave * 0.028 + stormUndulation * 0.075 + (regional - 0.5) * 0.018;
     } else {
-      // Broad connected landmasses keep the view occupied by terrain instead of isolated islands.
-      // Coastal falloff is kept to the distant edge of the patch; local topography stays continuous.
-      const lobeA = 1.10 - Math.sqrt(((nx - 0.50) / 0.70) ** 2 + ((nz - 0.56) / 0.73) ** 2);
-      const lobeB = 0.93 - Math.sqrt(((nx - 0.78) / 0.40) ** 2 + ((nz - 0.65) / 0.46) ** 2);
-      const lobeC = 0.74 - Math.sqrt(((nx - 0.23) / 0.34) ** 2 + ((nz - 0.28) / 0.37) ** 2);
-      const peninsula = 0.52 - Math.abs(nz - (0.29 + (nx - 0.48) * 0.65)) * 1.9 - Math.max(0, nx - 0.43) * 0.40;
-      const coastShape = Math.max(lobeA, lobeB, lobeC, peninsula) + (coastNoise - 0.5) * 0.10 + (regional - 0.5) * 0.045;
-      const landMask = smoothRange(-0.40, 0.08, coastShape);
-      const mountainMask = smoothRange(0.34, 0.72, massif);
-      const ridgeAxis = z - (Math.sin(x * 0.22 + seed) * 4.2 + x * 0.12 + 0.5);
-      const mountainBelt = Math.exp(-Math.pow(ridgeAxis / (type === "rocky" ? 8.3 : 7.4), 2));
-      const secondaryBelt = Math.exp(-Math.pow((z + x * 0.26 + 9.5) / 5.2, 2)) * 0.24;
-      const connectedRidges = Math.pow(Math.max(0, mountainBelt * 0.72 + secondaryBelt), 0.88) * (0.16 + ridges * 0.34) * (0.48 + mountainMask * 0.52);
-      const lowland = (regional - 0.5) * 0.42 + (continental - 0.48) * 0.26;
-      height = -0.92 + landMask * (1.18 + lowland * 0.78 + continental * 0.10);
-      height += connectedRidges * relief * landMask * 0.78;
-      height += (fine - 0.5) * 0.025 * landMask;
+      // Shoreline lies toward the far view. Noise warps it into bays and headlands.
+      const shoreWiggle = Math.sin(u * 11.4 + seed * 0.03) * 0.018
+        + (coastNoise - 0.5) * 0.085 + (regional - 0.5) * 0.035;
+      const shoreline = 0.095 + config.surface.waterFraction * 0.22 + shoreWiggle;
+      const shoreMask = smoothRange(shoreline - 0.045, shoreline + 0.095, v);
+      const sideFade = smoothRange(0.0, 0.06, nx) * (1 - smoothRange(0.94, 1.0, nx));
+      const endFade = (1 - smoothRange(0.965, 1.0, nz));
+      const landMask = shoreMask * sideFade * endFade;
 
-      if (type === "icy") height = -0.92 + landMask * (1.14 + lowland * 0.66) + connectedRidges * relief * landMask * 0.84;
+      const ridgeAxisA = z - (Math.sin(x * 0.075 + seed * 0.01) * 2.7 + x * 0.075 - 10.5);
+      const ridgeAxisB = z + x * 0.16 + 22.0 + Math.sin(x * 0.05) * 1.5;
+      const beltWidthA = type === "rocky" ? 7.8 : type === "icy" ? 8.9 : 7.0;
+      const mountainBeltA = Math.exp(-Math.pow(ridgeAxisA / beltWidthA, 2));
+      const mountainBeltB = Math.exp(-Math.pow(ridgeAxisB / 8.2, 2)) * 0.32;
+      const ridgedPeaks = Math.pow(clamp(1 - Math.abs(ridgeSource * 2 - 1), 0, 1), 1.48);
+      const mountainMass = smoothRange(0.27, 0.74, massif);
+      const connectedRidges = (mountainBeltA * (0.18 + ridgedPeaks * 0.46) * (0.44 + mountainMass * 0.56)
+        + mountainBeltB * (0.18 + ridgedPeaks * 0.34));
+      const lowland = (regional - 0.5) * 0.38 + (continental - 0.5) * 0.32;
+      const broadLand = seaLevel - 0.82 + landMask * (1.48 + lowland * 0.60 + (continental - 0.5) * 0.12);
+      const smallRelief = (fine - 0.5) * 0.025 * landMask;
+      const mountainRelief = connectedRidges * relief * landMask * terrainRelief * 1.22;
+      const hillsideRelief = Math.max(0, massif - 0.43) * landMask * terrainRelief * 0.16;
+      height = broadLand + smallRelief + mountainRelief + hillsideRelief;
+
+      // River-like erosion cuts are subtle and broad, avoiding the needle peaks of the previous field.
+      const drainageField = fractalNoise(u * 10.8 + 13, v * 9.4 - 6, seed + 139);
+      const channel = 1 - smoothRange(0.01, 0.095, Math.abs(drainageField - 0.5));
+      height -= channel * landMask * 0.035;
+
+      if (type === "icy") {
+        const glacierRidges = Math.pow(clamp(1 - Math.abs(fractalNoise(u * 6.1 + 2, v * 5.3 - 9, seed + 151) * 2 - 1), 0, 1), 1.8);
+        height += glacierRidges * landMask * terrainRelief * 0.10;
+      }
       if (type === "desert") {
-        height += Math.sin(nz * 24 + regional * 3.1) * 0.04 * landMask;
-        height += Math.pow(Math.max(0, ridgeSource - 0.28), 2) * landMask * 0.19;
+        const duneField = Math.sin(z * 0.42 + (regional - 0.5) * 3.2 + x * 0.035);
+        height += duneField * 0.045 * landMask + Math.pow(Math.max(0, ridgeSource - 0.63), 2) * landMask * 0.22;
       }
       if (type === "volcanic") {
-        const coneDistance = Math.sqrt(((x + 4.5) / 5.2) ** 2 + ((z - 1.5) / 5.0) ** 2);
-        const cone = Math.max(0, 1 - coneDistance);
-        const crater = Math.exp(-(((x + 4.5) ** 2 + (z - 1.5) ** 2) / 8.0));
-        height += (cone * 0.98 - crater * 0.20) * landMask;
+        const coneDistance = Math.sqrt(((x + 11.0) / 8.4) ** 2 + ((z + 8.0) / 7.3) ** 2);
+        const cone = Math.pow(Math.max(0, 1 - coneDistance), 1.45) * 0.88;
+        const crater = Math.exp(-Math.pow(coneDistance / 0.17, 2)) * 0.20;
+        height += (cone - crater) * landMask * terrainRelief;
       }
-      height *= relief;
-      height = THREE.MathUtils.lerp(-1.20, height, smoothRange(0.005, 0.28, coastShape + 0.12));
-      height = -1.20 + (height + 1.20) * terrainRelief;
+      if (type === "ocean") {
+        // Low rounded islands and shelves remain visible, while the increased water fraction
+        // moves the shoreline inland rather than creating a vertical ocean wall.
+        height -= (1 - landMask) * 0.04;
+      }
+      if (type === "custom" || type === "rocky") {
+        height += Math.max(0, massif - 0.62) * landMask * terrainRelief * 0.08;
+      }
     }
 
     heights[i] = height;
@@ -295,74 +310,68 @@ function buildTerrainGeometry(config, terrainRelief = 1.0, ringShadows = false) 
   const colors = new Float32Array(positions.count * 3);
   const userTint = new THREE.Color(surfaceColorHex);
   const wavelength = config.observer.viewing.wavelength;
-
-  const oceanDeep = new THREE.Color(type === "icy" ? "#153c59" : "#0a314f");
-  const oceanShelf = new THREE.Color(type === "icy" ? "#4d91a5" : "#267d91");
-  const beach = new THREE.Color(type === "icy" ? "#a5c9d1" : "#b3a47a");
-  const grassLow = new THREE.Color(type === "icy" ? "#557f88" : type === "desert" ? "#9c794e" : type === "volcanic" ? "#282b2b" : type === "rocky" ? "#7a654e" : "#315b45");
-  const grassHigh = new THREE.Color(type === "icy" ? "#a9cbd0" : type === "desert" ? "#c8a875" : type === "volcanic" ? "#4d5150" : type === "rocky" ? "#a48c70" : "#718564");
-  const rock = new THREE.Color(type === "icy" ? "#9fbfc9" : type === "desert" ? "#a18b6b" : "#777b78");
+  const oceanDeep = new THREE.Color(type === "icy" ? "#153c59" : "#082940");
+  const oceanShelf = new THREE.Color(type === "icy" ? "#4d91a5" : "#247184");
+  const beach = new THREE.Color(type === "icy" ? "#a5c9d1" : type === "desert" ? "#c6a779" : "#b3a47a");
+  const grassLow = new THREE.Color(type === "icy" ? "#557f88" : type === "desert" ? "#98764c" : type === "volcanic" ? "#282b2b" : type === "rocky" ? "#766452" : "#315b45");
+  const grassHigh = new THREE.Color(type === "icy" ? "#a9cbd0" : type === "desert" ? "#c4a575" : type === "volcanic" ? "#4d5150" : type === "rocky" ? "#a18a70" : "#738464");
+  const rock = new THREE.Color(type === "icy" ? "#9fbfc9" : type === "desert" ? "#a18b6b" : type === "volcanic" ? "#69615e" : "#777b78");
   const snow = new THREE.Color(type === "icy" ? "#f2fbff" : "#dce8e9");
   const gasBase = userTint.clone();
   const gasCream = new THREE.Color("#d6b898");
   const gasDark = new THREE.Color("#704c42");
+  const waterTint = new THREE.Color("#215368");
+  const volcanicEmber = new THREE.Color("#a74421");
+  const falseColor = wavelength === "infrared" ? new THREE.Color("#bd5873") : wavelength === "ultraviolet" ? new THREE.Color("#7b6bd0") : null;
+  const color = new THREE.Color();
 
   for (let i = 0; i < positions.count; i += 1) {
     const height = heights[i];
     const nx = positions.getX(i) / width + 0.5;
     const nz = positions.getZ(i) / depth + 0.5;
-    let color;
 
     if (isGasGiant) {
-      const band = 0.5 + 0.5 * Math.sin(nz * 83 + fractalNoise(nx * 3.6, nz * 8.1, seed + 43) * 3.0);
-      color = gasDark.clone().lerp(gasBase, 0.48).lerp(gasCream, smoothRange(0.42, 0.77, band) * 0.88);
+      const band = 0.5 + 0.5 * Math.sin(nz * 72 + (fractalNoise(nx * 3.5, nz * 6.2, seed + 43) - 0.5) * 2.8);
+      color.copy(gasDark).lerp(gasBase, 0.50).lerp(gasCream, smoothRange(0.42, 0.77, band) * 0.82);
       const turbulentCloud = fractalNoise(nx * 9.0, nz * 3.2, seed + 143);
-      color.lerp(gasCream, smoothRange(0.72, 0.9, turbulentCloud) * 0.22);
-    } else if (config.surface.waterFraction > 0.04 && height < seaLevel) {
-      const depthFactor = clamp((seaLevel - height) / 1.15, 0, 1);
-      color = oceanShelf.clone().lerp(oceanDeep, depthFactor);
-    } else if (config.surface.waterFraction > 0.04 && height < seaLevel + 0.085) {
-      color = beach.clone().lerp(grassLow, smoothRange(seaLevel + 0.01, seaLevel + 0.12, height) * 0.28);
+      color.lerp(gasCream, smoothRange(0.72, 0.9, turbulentCloud) * 0.18);
+    } else if (height < seaLevel) {
+      const depthFactor = clamp((seaLevel - height) / 0.90, 0, 1);
+      color.copy(oceanShelf).lerp(oceanDeep, smoothRange(0.02, 0.85, depthFactor));
+      color.lerp(waterTint, 0.07);
+    } else if (height < seaLevel + 0.20) {
+      color.copy(beach).lerp(grassLow, smoothRange(seaLevel + 0.025, seaLevel + 0.22, height) * 0.34);
     } else {
-      const relativeElevation = clamp((height - seaLevel) / 1.55, 0, 1);
-      color = grassLow.clone().lerp(grassHigh, smoothRange(0.08, 0.62, relativeElevation));
+      const relativeElevation = clamp((height - seaLevel) / 1.85, 0, 1);
+      color.copy(grassLow).lerp(grassHigh, smoothRange(0.12, 0.66, relativeElevation));
       const normalY = normals.getY(i);
       const slope = 1 - clamp(normalY, 0, 1);
-      color.lerp(rock, smoothRange(0.16, 0.42, slope) * 0.83);
-
-      const snowStart = 0.77 - config.surface.snowIceFraction * 0.5;
-      const snowCoverage = smoothRange(snowStart, Math.min(1.8, snowStart + 0.32), height)
-        * clamp(0.22 + config.surface.snowIceFraction * 1.8, 0, 1);
+      color.lerp(rock, smoothRange(0.17, 0.48, slope) * 0.78);
+      const snowStart = type === "icy" ? 0.06 : 0.62 - config.surface.snowIceFraction * 0.42;
+      const snowCoverage = smoothRange(snowStart, snowStart + 0.40, height - seaLevel)
+        * clamp(0.20 + config.surface.snowIceFraction * 1.7, 0, 1);
       color.lerp(snow, snowCoverage);
 
+      const albedoBreakup = fractalNoise(nx * 13.0 + 7, nz * 12.0 - 4, seed + 173);
+      color.multiplyScalar(0.94 + albedoBreakup * 0.12);
       if (type === "volcanic") {
-        const fissure = fractalNoise(nx * 22, nz * 19, seed + 177);
-        const lava = smoothRange(0.76, 0.86, fissure) * (1 - smoothRange(0.8, 1.15, height));
-        color.lerp(new THREE.Color("#a74421"), lava * 0.72);
+        const fissure = fractalNoise(nx * 19.5 + 4, nz * 18.0 - 8, seed + 177);
+        const lava = smoothRange(0.78, 0.88, fissure) * (1 - smoothRange(0.72, 1.0, height));
+        color.lerp(volcanicEmber, lava * 0.62);
       }
-      if (type === "custom" || type === "rocky") color.lerp(userTint, type === "custom" ? 0.42 : 0.12);
+      if (type === "custom" || type === "rocky") color.lerp(userTint, type === "custom" ? 0.36 : 0.10);
     }
 
-    if (ringShadows && !isGasGiant) {
+    if (ringShadows && !isGasGiant && height > seaLevel) {
       const x = positions.getX(i);
       const z = positions.getZ(i);
       const curve = Math.sin(z * 0.055) * 3.4 + z * 0.31 + 3.0;
       const bandA = 1 - smoothRange(0.55, 1.9, Math.abs(x - curve));
       const bandB = 1 - smoothRange(0.32, 1.15, Math.abs(x - curve - 4.2 - Math.sin(z * 0.035) * 1.2));
-      color.multiplyScalar(1 - Math.max(bandA * 0.32, bandB * 0.21));
+      color.multiplyScalar(1 - Math.max(bandA * 0.26, bandB * 0.16));
     }
 
-    // Optional false-colour viewing bands are a visualization mode, not literal imagery.
-    if (wavelength === "infrared") color.lerp(new THREE.Color("#bd5873"), isGasGiant ? 0.12 : 0.28);
-    if (wavelength === "ultraviolet") color.lerp(new THREE.Color("#7b6bd0"), isGasGiant ? 0.1 : 0.28);
-
-    // Slight contour banding helps the eye read elevation changes without a wireframe.
-    if (!isGasGiant && height > seaLevel) {
-      const contourDistance = Math.abs(((height - seaLevel) * 5.2) % 1 - 0.5);
-      const contour = 1 - smoothRange(0.455, 0.49, contourDistance);
-      color.lerp(new THREE.Color("#101d25"), contour * 0.075);
-    }
-
+    if (falseColor) color.lerp(falseColor, 0.24);
     colors[i * 3] = color.r;
     colors[i * 3 + 1] = color.g;
     colors[i * 3 + 2] = color.b;
@@ -403,9 +412,9 @@ function TerrainPatch({ config, terrainRelief, ringShadows }) {
 
   const textures = useMemo(() => {
     const seed = ({ "ocean-and-rock": 101, rocky: 211, ocean: 307, icy: 401, desert: 503, volcanic: 601, "gas-giant": 701, custom: 809 }[config.surface.type] || 101);
-    const map = createTerrainDetailTexture(config.surface.type, seed, 9, 10, "color");
-    const bump = createTerrainDetailTexture(config.surface.type, seed, 9, 10, "bump");
-    const waterBump = createTerrainDetailTexture("ocean-and-rock", seed + 919, 18, 18, "bump");
+    const map = createTerrainDetailTexture(config.surface.type, seed, 17, 19, "color");
+    const bump = createTerrainDetailTexture(config.surface.type, seed, 17, 19, "bump");
+    const waterBump = createTerrainDetailTexture("ocean-and-rock", seed + 919, 22, 22, "bump");
     return { map, bump, waterBump };
   }, [config.surface.type]);
   useEffect(() => () => { textures.map.dispose(); textures.bump.dispose(); textures.waterBump.dispose(); }, [textures]);
@@ -416,11 +425,11 @@ function TerrainPatch({ config, terrainRelief, ringShadows }) {
         <meshPhysicalMaterial
           map={textures.map}
           bumpMap={textures.bump}
-          bumpScale={0.13}
+          bumpScale={isGasGiant ? 0.012 : 0.032}
           vertexColors
           roughness={clamp(config.surface.roughness, 0.2, 1)}
-          clearcoat={0.035}
-          clearcoatRoughness={0.88}
+          clearcoat={0.018}
+          clearcoatRoughness={0.94}
           metalness={config.surface.type === "volcanic" ? 0.08 : 0.01}
           emissive={config.surface.type === "volcanic" ? "#2d1208" : "#000000"}
           emissiveIntensity={config.surface.type === "volcanic" ? 0.12 : 0}
@@ -431,7 +440,7 @@ function TerrainPatch({ config, terrainRelief, ringShadows }) {
       {!isGasGiant && config.surface.waterFraction > 0.04 && (
         <mesh position={[0, seaLevel + 0.012, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
           <planeGeometry args={[260, 260, 1, 1]} />
-          <meshPhysicalMaterial color={waterColor === "#0c4768" ? "#135b73" : waterColor} bumpMap={textures.waterBump} bumpScale={0.045} roughness={0.22} metalness={0.08} clearcoat={0.82} clearcoatRoughness={0.14} emissive={waterColor} emissiveIntensity={0.22} side={THREE.DoubleSide} />
+          <meshPhysicalMaterial color={waterColor === "#0c4768" ? "#135b73" : waterColor} bumpMap={textures.waterBump} bumpScale={0.018} roughness={0.34} metalness={0.025} clearcoat={0.58} clearcoatRoughness={0.24} emissive={waterColor} emissiveIntensity={0.035} side={THREE.DoubleSide} />
         </mesh>
       )}
     </group>
@@ -571,7 +580,7 @@ function SkyScene({ config, altitudeDeg, terrainRelief, celestial, ringShadows }
       {suns.map((sun, index) => <group key={`${sun.name}-disc`} position={sun.position}>
         <mesh>
           <sphereGeometry args={[index === 0 ? starRadius : starRadius * 0.82, 32, 24]} />
-          <meshBasicMaterial color={sun.color} toneMapped={false} />
+          <meshBasicMaterial color={new THREE.Color(sun.color).multiplyScalar(1.7)} toneMapped={false} />
         </mesh>
         <mesh scale={2.1}>
           <sphereGeometry args={[index === 0 ? starRadius : starRadius * 0.82, 32, 24]} />
@@ -753,7 +762,7 @@ function SkyCard({ config, altitudeDeg, fluxWm2, equilibriumK, explanation, last
 export default function PlanetSkyView() {
   const [initial] = useState(() => loadInitialSkyConfig());
   const [config, setConfig] = useState(() => initial.config);
-  const [terrainRelief, setTerrainRelief] = useState(1.0);
+  const [terrainRelief, setTerrainRelief] = useState(() => initial.terrainRelief ?? 1.0);
   const [celestial, setCelestial] = useState(() => ({ ...DEFAULT_CELESTIAL_SETTINGS, ...(initial.celestial || {}) }));
   const [prompt, setPrompt] = useState("");
   const [promptPreview, setPromptPreview] = useState(null);
@@ -840,13 +849,15 @@ export default function PlanetSkyView() {
 
   async function shareConfiguration() {
     try {
-      const url = createSkyShareUrl(config, window.location.href, celestial);
+      const url = createSkyShareUrl(config, window.location.href, celestial, terrainRelief);
       setShareUrl(url);
       try {
-        await navigator.clipboard.writeText(url);
-        setShareMessage("Share URL copied. Open it in a new tab to restore this configuration.");
-      } catch {
-        setShareMessage("Clipboard access was blocked. Copy the URL from the field below.");
+        const method = await copyTextToClipboard(url);
+        setShareMessage(method === "fallback"
+          ? "Share URL created and copied using the compatibility fallback. Open it in a new tab to restore this configuration."
+          : "Share URL created and copied. Open it in a new tab to restore this configuration.");
+      } catch (copyError) {
+        setShareMessage(`Share URL created, but automatic copying failed. Use the URL field below to copy it. ${copyError instanceof Error ? copyError.message : ""}`.trim());
       }
     } catch (error) {
       setShareMessage(`Could not create the share URL: ${error instanceof Error ? error.message : "unknown error"}`);
@@ -854,12 +865,20 @@ export default function PlanetSkyView() {
   }
 
   async function copyShareUrl() {
-    if (!shareUrl) return;
+    if (!shareUrl) {
+      setShareMessage("Create a share URL first.");
+      return;
+    }
     try {
-      await navigator.clipboard.writeText(shareUrl);
-      setShareMessage("Share URL copied.");
-    } catch {
-      setShareMessage("Select the URL field and copy it manually.");
+      const method = await copyTextToClipboard(shareUrl);
+      setShareMessage(method === "fallback" ? "Share URL copied using the compatibility fallback." : "Share URL copied.");
+    } catch (error) {
+      setShareMessage(error instanceof Error ? error.message : "Select the URL field and copy it manually.");
+      const urlField = document.querySelector(".sky-share-url input");
+      if (urlField instanceof HTMLInputElement) {
+        urlField.focus();
+        urlField.select();
+      }
     }
   }
 
@@ -978,25 +997,15 @@ export default function PlanetSkyView() {
             <RangeField label="Time of day" value={config.observer.timeOfDayHours} min={0} max={config.observer.dayLengthHours} step={0.25} unit="hours" onChange={(value) => updateConfig("observer.timeOfDayHours", value)} help="Drag from night through sunrise, noon, and sunset." />
             <RangeField label="Terrain relief" value={terrainRelief} min={0.8} max={2.1} step={0.05} unit="×" disabled={config.surface.type === "gas-giant"} onChange={setTerrainRelief} help={config.surface.type === "gas-giant" ? "Cloud-top scenes do not use ground relief." : "Lift the peaks and valleys for a stronger 3D profile."} />
           </div>
-          <div className="sky-controls__note"><span className="sky-controls__note-orb" /><p><strong>Tip:</strong> drag the scene to look around and scroll to move closer. The terrain is procedural and illustrative, not measured elevation data.</p></div>
-          <details className="sky-celestial-panel no-print">
-            <summary><span>CELESTIAL EXPERIMENTS</span><strong>Multiple suns, moons & ring shadows</strong><small>Optional lighting controls; your settings are included in share links.</small></summary>
-            <div className="sky-celestial-panel__fields">
-              <SelectField label="Number of suns" value={String(celestial.sunCount)} options={[{ value: "1", label: "One sun" }, { value: "2", label: "Binary suns" }, { value: "3", label: "Three suns" }]} onChange={(value) => updateCelestial("sunCount", Number(value))} help="Each star contributes its own light and atmospheric scattering." />
-              {celestial.sunCount > 1 && <RangeField label="Sun separation" value={celestial.separationDeg} min={10} max={90} step={1} unit="°" onChange={(value) => updateCelestial("separationDeg", value)} help="Change how far apart the companion suns appear in the sky." />}
-              <ToggleField label="Moon + cool moonlight" checked={celestial.moon} onChange={(value) => updateCelestial("moon", value)} help="Adds a visible moon and blue-toned night illumination." />
-              <ToggleField label="Ringed companion + ground shadows" checked={celestial.ringShadows} onChange={(value) => updateCelestial("ringShadows", value)} help="Adds a ringed body and broad stylized shadow bands across terrain." />
-            </div>
-            <p>Separate sun lights can create multiple overlapping shadows and offset sunset colors. Ring-shadow bands are a visual projection, not a complete orbital eclipse calculation.</p>
-          </details>
         </section>
 
         <section className="sky-visual-column" aria-label="Planet sky visualization">
           <div className="sky-viewport">
             <div className="sky-viewport__top"><span>02 / LOCAL TERRAIN + SKY</span><span className="sky-viewport__live"><i /> GROUND-LEVEL VIEW</span></div>
             <div className="sky-canvas">
-              <Canvas shadows camera={{ position: [0, 8.8, 8.8], fov: 47, near: 0.1, far: 180 }} dpr={[1, 1.5]} gl={{ antialias: true, preserveDrawingBuffer: true, toneMapping: THREE.ACESFilmicToneMapping }} onCreated={({ gl }) => { rendererRef.current = gl; }}>
+              <Canvas shadows camera={{ position: [0, 8.8, 8.8], fov: 47, near: 0.1, far: 180 }} dpr={[1, 1.5]} gl={{ antialias: true, preserveDrawingBuffer: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.08 }} onCreated={({ gl }) => { rendererRef.current = gl; }}>
                 <SkyScene config={config} altitudeDeg={altitudeDeg} terrainRelief={terrainRelief} celestial={celestial} ringShadows={celestial.ringShadows} />
+                <CinematicPostFX bloomStrength={0.34} bloomRadius={0.7} bloomThreshold={0.77} vignetteOffset={1.02} vignetteDarkness={1.24} />
               </Canvas>
               <div className="sky-canvas__hud"><span>{config.star.spectralClass}-CLASS / {config.star.name.toUpperCase()}</span><span>RAYLEIGH + MIE SKY · {config.surface.type === "gas-giant" ? "CLOUD-TOP VIEW" : "PROCEDURAL TERRAIN"} · STAR {altitudeDeg >= 0 ? "ABOVE" : "BELOW"} HORIZON</span></div>
             </div>
@@ -1010,6 +1019,20 @@ export default function PlanetSkyView() {
               <strong>{altitudeDeg >= 0 ? "+" : ""}{altitudeDeg.toFixed(2)}°</strong>
               <p>δ = asin(sin ε · sin 2πp) · h = asin(sin φ sin δ + cos φ cos δ cos H). Latitude, axial tilt, season phase, day length and time of day feed the result.</p>
             </div>
+          </div>
+
+          <div className="sky-visual-extras no-print" aria-label="Terrain tips and celestial settings">
+            <div className="sky-controls__note"><span className="sky-controls__note-orb" /><p><strong>Tip:</strong> drag the scene to look around and scroll to move closer. The terrain is procedural and illustrative, not measured elevation data.</p></div>
+            <details className="sky-celestial-panel">
+              <summary><span>CELESTIAL EXPERIMENTS</span><strong>Multiple suns, moons &amp; ring shadows</strong><small>Optional lighting controls; your settings are included in share links.</small></summary>
+              <div className="sky-celestial-panel__fields">
+                <SelectField label="Number of suns" value={String(celestial.sunCount)} options={[{ value: "1", label: "One sun" }, { value: "2", label: "Binary suns" }, { value: "3", label: "Three suns" }]} onChange={(value) => updateCelestial("sunCount", Number(value))} help="Each star contributes its own light and atmospheric scattering." />
+                {celestial.sunCount > 1 && <RangeField label="Sun separation" value={celestial.separationDeg} min={10} max={90} step={1} unit="°" onChange={(value) => updateCelestial("separationDeg", value)} help="Change how far apart the companion suns appear in the sky." />}
+                <ToggleField label="Moon + cool moonlight" checked={celestial.moon} onChange={(value) => updateCelestial("moon", value)} help="Adds a visible moon and blue-toned night illumination." />
+                <ToggleField label="Ringed companion + ground shadows" checked={celestial.ringShadows} onChange={(value) => updateCelestial("ringShadows", value)} help="Adds a ringed body and broad stylized shadow bands across terrain." />
+              </div>
+              <p>Separate sun lights can create multiple overlapping shadows and offset sunset colors. Ring-shadow bands are a visual projection, not a complete orbital eclipse calculation.</p>
+            </details>
           </div>
 
           <details className="sky-prompt-panel no-print sky-prompt-details">

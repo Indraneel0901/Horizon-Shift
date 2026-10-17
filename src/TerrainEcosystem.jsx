@@ -53,7 +53,8 @@ export default function TerrainEcosystem({ geometry, type = "temperate", scaleFa
       const x = (ux - 0.5) * meta.width * 0.9;
       const z = (uz - 0.5) * meta.depth * 0.88;
       const column = Math.round(x / cellWidth + meta.segmentsX / 2);
-      const row = Math.round(meta.segmentsZ / 2 - z / cellDepth);
+      // PlaneGeometry is rotated by -90° around X, so its row index increases with world-space Z.
+      const row = Math.round(meta.segmentsZ / 2 + z / cellDepth);
       if (column < 1 || column >= meta.segmentsX || row < 1 || row >= meta.segmentsZ) continue;
       const vertex = row * (meta.segmentsX + 1) + column;
       const y = positions.getY(vertex);

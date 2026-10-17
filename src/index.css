@@ -167,3 +167,9 @@ button, select { -webkit-tap-highlight-color: transparent; }
 .generator-controls label input:not([type=checkbox]):not([type=range]):not([type=color]),.generator-controls label select{width:100%;min-width:0;padding:9px;background:#071321;border:1px solid #29465f;border-radius:6px;color:#edf8ff}
 .generator-controls .generate-button{grid-column:span 1}
 @media(max-width:700px){.terrain-celestial-config__fields{grid-template-columns:1fr}.generator-controls{grid-template-columns:1fr}.generator-controls .generate-button{grid-column:1}}
+
+
+/* Cinematic finishing for the Earth local-terrain viewport only. */
+.terrain-canvas { isolation: isolate; background: radial-gradient(ellipse at 50% 45%, #183847 0%, #091725 58%, #030812 100%); }
+.terrain-canvas::after { content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none; border-radius: inherit; background: radial-gradient(ellipse at 50% 48%, transparent 48%, rgba(1, 5, 13, .19) 100%), linear-gradient(180deg, rgba(4, 10, 18, .02) 55%, rgba(2, 7, 14, .12) 100%); }
+.terrain-overlay { z-index: 2; }

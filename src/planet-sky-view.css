@@ -538,3 +538,97 @@
 .sky-celestial-panel>p{margin:10px 0 0;font-size:10px;line-height:1.5;color:#89a6bf}
 .terrain-canvas,.sky-canvas,.generated-preview{background:radial-gradient(ellipse at 50% 5%,#143b59 0%,#061727 65%,#030914 100%)}
 .terrain-canvas canvas,.sky-canvas canvas,.generated-preview canvas{display:block;width:100%;height:100%}
+
+
+/* Post-processed Planet Sky Lab canvas: retain a soft horizon frame without double-filtering the render. */
+.sky-canvas { isolation: isolate; background: radial-gradient(ellipse at 50% 64%, rgba(46, 111, 139, .20), transparent 50%), linear-gradient(180deg, #12263d 0%, #3b5c6b 43%, #081722 100%); }
+.sky-canvas canvas { filter: none; }
+.sky-canvas::after { z-index: 1; background: radial-gradient(ellipse at center, transparent 48%, rgba(1, 5, 13, .16) 100%), linear-gradient(180deg, rgba(3, 8, 17, 0) 65%, rgba(2, 8, 16, .12) 100%); }
+
+
+/* Layout fix: keep the tip and celestial experiments in normal flow below the terrain viewport. */
+.sky-controls {
+  position: static;
+  top: auto;
+  max-height: none;
+  overflow: visible;
+  z-index: auto;
+}
+
+.sky-visual-extras {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.75rem;
+  width: 100%;
+  min-width: 0;
+  position: relative;
+  inset: auto;
+  z-index: 0;
+}
+
+.sky-visual-extras > .sky-controls__note,
+.sky-visual-extras > .sky-celestial-panel {
+  display: block;
+  position: static;
+  inset: auto;
+  transform: none;
+  float: none;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0;
+  box-sizing: border-box;
+}
+
+.sky-visual-extras > .sky-controls__note {
+  display: flex;
+  align-items: flex-start;
+}
+
+.sky-visual-extras > .sky-celestial-panel[open] {
+  flex: none;
+}
+
+/* Tablet layout: report starts below both columns; no explicit row spans can overlap it. */
+@media (max-width: 1500px) and (min-width: 901px) {
+  .planet-sky-layout {
+    grid-template-columns: minmax(245px, 0.78fr) minmax(0, 1.55fr);
+    align-items: start;
+  }
+
+  .sky-controls {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .sky-visual-column {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .sky-report-column {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+@media (max-width: 900px) {
+  .planet-sky-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sky-controls,
+  .sky-visual-column,
+  .sky-report-column {
+    grid-column: 1;
+    grid-row: auto;
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .sky-visual-extras {
+    gap: 0.65rem;
+  }
+}
