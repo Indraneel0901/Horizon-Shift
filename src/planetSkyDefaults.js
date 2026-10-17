@@ -1,0 +1,136 @@
+export const EARTH_REFERENCE = {
+  schemaVersion: 1,
+  id: "earth-reference",
+  name: "Earth reference",
+  kind: "terrestrial",
+  atmosphere: {
+    present: true,
+    // A visual dome parameter, not a sharp physical boundary of the atmosphere.
+    renderedThicknessKm: 100,
+    surfacePressureKPa: 101.4,
+    densityKgM3: 1.217,
+    // Major non-CO2 gases are expressed as relative shares and normalized to 100%.
+    // CO2 is held separately in ppm so trace Earth values and CO2-rich fictional mixes
+    // can both be represented without conflating units.
+    compositionPct: {
+      nitrogen: 78.08,
+      oxygen: 20.95,
+      argon: 0.934,
+      methane: 0.0002,
+      hydrogen: 0.00005,
+      helium: 0.00005,
+      other: 0.0357,
+    },
+    co2Ppm: 420,
+    aerosol: 0.1,
+  },
+  star: {
+    name: "Sun",
+    spectralClass: "G",
+    effectiveTemperatureK: 5772,
+    colorHex: "#fff1ce",
+    luminositySolar: 1,
+    distanceAU: 1,
+  },
+  surface: {
+    type: "ocean-and-rock",
+    baseColorHex: "#275d72",
+    bondAlbedo: 0.294,
+    roughness: 0.82,
+    waterFraction: 0.71,
+    snowIceFraction: 0.03,
+    cloudDeck: true,
+  },
+  observer: {
+    latitudeDeg: 0,
+    axialTiltDeg: 23.44,
+    dayLengthHours: 24,
+    timeOfDayHours: 12,
+    // 0 = equinox reference; 0.25 and 0.75 are solstice-like phases in this toy model.
+    yearProgress: 0,
+    viewing: {
+      cloudiness: 0.2,
+      haze: 0.1,
+      moonlight: 0.15,
+      exposure: 1,
+      wavelength: "visible",
+      airglow: true,
+      skyTintHex: "#5aa1d9",
+    },
+  },
+  mechanic: { type: "solar-altitude", enabled: true },
+  provenance: {
+    kind: "real-reference",
+    sourceLabel: "NASA/NSSDC Earth and Sun Fact Sheets",
+  },
+};
+
+export const INITIAL_ILLUSTRATIVE_WORLD = {
+  schemaVersion: 1,
+  id: "custom-world",
+  name: "Custom world",
+  kind: "terrestrial",
+  atmosphere: {
+    present: true,
+    renderedThicknessKm: 150,
+    surfacePressureKPa: 150,
+    densityKgM3: 1.8,
+    compositionPct: {
+      nitrogen: 70,
+      oxygen: 5,
+      argon: 2,
+      methane: 3,
+      hydrogen: 5,
+      helium: 5,
+      other: 10,
+    },
+    co2Ppm: 800000,
+    aerosol: 0.3,
+  },
+  star: {
+    name: "Red dwarf",
+    spectralClass: "M",
+    effectiveTemperatureK: 3200,
+    colorHex: "#ff9b63",
+    luminositySolar: 0.03,
+    distanceAU: 0.2,
+  },
+  surface: {
+    type: "rocky",
+    baseColorHex: "#9b593e",
+    bondAlbedo: 0.25,
+    roughness: 0.9,
+    waterFraction: 0.18,
+    snowIceFraction: 0.02,
+    cloudDeck: true,
+  },
+  observer: {
+    latitudeDeg: 35,
+    axialTiltDeg: 28,
+    dayLengthHours: 30,
+    timeOfDayHours: 23,
+    yearProgress: 0.7,
+    viewing: {
+      cloudiness: 0.4,
+      haze: 0.45,
+      moonlight: 0.15,
+      exposure: 1,
+      wavelength: "visible",
+      airglow: true,
+      skyTintHex: "#df814c",
+    },
+  },
+  mechanic: { type: "solar-altitude", enabled: true },
+  provenance: { kind: "illustrative", sourceLabel: "User-configured illustrative scenario" },
+};
+
+export const STAR_PRESETS = {
+  M: { name: "Red dwarf", effectiveTemperatureK: 3200, colorHex: "#ff9b63", luminositySolar: 0.03 },
+  K: { name: "Orange dwarf", effectiveTemperatureK: 4500, colorHex: "#ffc07c", luminositySolar: 0.4 },
+  G: { name: "Sun-like star", effectiveTemperatureK: 5772, colorHex: "#fff1ce", luminositySolar: 1 },
+  F: { name: "Yellow-white star", effectiveTemperatureK: 6500, colorHex: "#fff2df", luminositySolar: 1.5 },
+  A: { name: "White star", effectiveTemperatureK: 9000, colorHex: "#dce9ff", luminositySolar: 10 },
+  B: { name: "Blue-white star", effectiveTemperatureK: 20000, colorHex: "#a9c8ff", luminositySolar: 1000 },
+  O: { name: "Blue star", effectiveTemperatureK: 35000, colorHex: "#83aaff", luminositySolar: 10000 },
+  Custom: { name: "Custom star", effectiveTemperatureK: 5772, colorHex: "#fff1ce", luminositySolar: 1 },
+};
